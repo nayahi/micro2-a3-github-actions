@@ -89,6 +89,12 @@ if (-not $login -or $login.StatusCode -ne 200) {
 $token = ($login.Content | ConvertFrom-Json).token
 Simular 0
 
+# Repone el stock del producto 1: cada corrida confirma pedidos, y una saga sin compensación lo pierde.
+$admin = Pedir POST "$Gateway/api/auth/login" @{ email = "admin@example.com"; clave = "Admin2026!" }
+if ($admin -and $admin.StatusCode -eq 200) {
+    $null = Pedir PUT "$Gateway/api/v1/productos/1/stock" @{ cantidad = 50 } ($admin.Content | ConvertFrom-Json).token
+}
+
 try {
     # ── TODO 1 · reintento ────────────────────────────────────────────────
     Write-Host "Apagando Productos ($Productos)…" -ForegroundColor DarkGray
