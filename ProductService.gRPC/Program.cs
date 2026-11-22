@@ -34,5 +34,19 @@ app.MapGrpcService<ProductGrpcService>();
 app.MapGrpcReflectionService();
 app.MapGrpcHealthChecksService();
 
+// Clase 4: la primera consulta a la base (EF Core + conexión a SQL Server) tarda más de 1 s, que es el timeout
+// por intento del gateway. Se hace aquí, antes de atender: si no, la llamada de prueba del circuito medio abierto
+// se cancela por timeout y el circuito se vuelve a abrir aunque Productos ya haya vuelto.
+try
+{
+    var reloj = System.Diagnostics.Stopwatch.StartNew();
+    using var calentar = app.Services.CreateScope();
+    int id = 1;                                     // la misma consulta que GetProduct, para que quede compilada
+    await calentar.ServiceProvider.GetRequiredService<CatalogDbContext>().Products.AsNoTracking()
+        .FirstOrDefaultAsync(p => p.Id == id);
+    Log.Information("Conexión a la base lista en {Ms} ms", reloj.ElapsedMilliseconds);
+}
+catch (Exception ex) { Log.Warning("No se pudo calentar la conexión a la base: {Error}", ex.Message); }
+
 Log.Information("ProductService.gRPC escuchando en el puerto 7001 (HTTP/2)");
 app.Run();

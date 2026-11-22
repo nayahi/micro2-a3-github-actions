@@ -32,7 +32,10 @@ builder.Services.AddGrpcClient<ProductService.ProductServiceClient>(o =>
     o.Address = new Uri(config["GrpcServicios:Productos"]!));
 // Clase 4: cliente de Pagos, para el paso 2 de la saga.
 builder.Services.AddGrpcClient<PaymentService.PaymentServiceClient>(o =>
-    o.Address = new Uri(config["GrpcServicios:Pagos"]!));
+    o.Address = new Uri(config["GrpcServicios:Pagos"]!))
+    // Como en el gateway: con HttpClientHandler la conexión se abre en cada intento. Con el handler por defecto,
+    // el canal gRPC queda en espera de reconexión tras la caída y el pedido fallaría también en la entrega siguiente.
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler());
 
 // Cliente de SNS apuntando a LocalStack. Con AWS real se quita ServiceURL y se usan credenciales reales.
 builder.Services.AddSingleton<IAmazonSimpleNotificationService>(_ =>

@@ -102,7 +102,7 @@ public class OrquestadorSaga(
         }
         catch (RpcException ex) when (ex.StatusCode == StatusCode.FailedPrecondition)
         {
-            pedido.Paso($"Pago rechazado: {ex.Status.Detail}");
+            pedido.Paso(ex.Status.Detail);                       // «Pago rechazado: …» (lo dice Pagos)
             await Compensar(pedido, ct);
         }
         catch (RpcException ex) when (Transitorio(ex))
@@ -123,6 +123,7 @@ public class OrquestadorSaga(
         var r = await productos.ReleaseStockAsync(new ReleaseStockRequest { OrderId = pedido.OrderId }, cancellationToken: ct);
         pedido.Cancelar(r.Released ? "Compensación: stock liberado" : "Compensación: no había stock reservado");
         log.LogWarning("Saga {Pedido}: CANCELADO y compensado (stock liberado: {Liberado})", pedido.OrderId, r.Released);
+        return;
     }
 
     private static bool Transitorio(RpcException ex) =>
