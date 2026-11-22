@@ -63,6 +63,17 @@ function EsperarFin([int[]]$ids, [string]$token, [int]$segundos) {
     return $estados
 }
 
+# Espera a que Productos y Pagos atiendan después de un «docker start» (hasta 60 s), para que una prueba
+# no falle (ni pase) por un servicio que todavía está arrancando.
+function EsperarServicios() {
+    $fin = (Get-Date).AddSeconds(60)
+    while ((Get-Date) -lt $fin) {
+        $p = Pedir GET "$Gateway/api/v1/productos/1"
+        if ($p -and $p.StatusCode -eq 200 -and (Cobros) -ge 0) { return }
+        Start-Sleep -Seconds 2
+    }
+}
+
 function Simular([double]$tasa) { $null = Pedir POST ("$Pagos/simulacion/pagos?tasaRechazo={0}" -f $tasa.ToString([cultureinfo]::InvariantCulture)) }
 
 function Cobros() {
@@ -92,7 +103,12 @@ Simular 0
 # Repone el stock del producto 1: cada corrida confirma pedidos, y una saga sin compensación lo pierde.
 $admin = Pedir POST "$Gateway/api/auth/login" @{ email = "admin@example.com"; clave = "Admin2026!" }
 if ($admin -and $admin.StatusCode -eq 200) {
-    $null = Pedir PUT "$Gateway/api/v1/productos/1/stock" @{ cantidad = 50 } ($admin.Content | ConvertFrom-Json).token
+    $tokenAdmin = ($admin.Content | ConvertFrom-Json).token
+    for ($i = 0; $i -lt 3; $i++) {        # sin el TODO 1, la primera llamada a Productos puede cortarse
+        $p = Pedir PUT "$Gateway/api/v1/productos/1/stock" @{ cantidad = 50 } $tokenAdmin
+        if ($p -and $p.StatusCode -eq 200) { break }
+        Start-Sleep -Seconds 2
+    }
 }
 
 try {
@@ -131,6 +147,7 @@ try {
     Prueba "3. Con Productos de vuelta, el circuito se cierra y GET /productos/1 responde 200" "TODO 2" ($abierto -and $cerro)
 
     # ── TODO 3 · compensación ─────────────────────────────────────────────
+    EsperarServicios
     Simular 1
     $s0 = Stock
     $id = CrearPedido $token 2
@@ -145,16 +162,23 @@ try {
     docker stop $ContenedorPagos *> $null
     $s0 = Stock
     $id = CrearPedido $token 1
-    Start-Sleep -Seconds 6
-    $durante = EstadoPedido $id $token
+    # Espera (hasta 9 s) a que la saga intente cobrar con Pagos apagado; recién entonces lo enciende.
+    Start-Sleep -Seconds 3
+    $fin = (Get-Date).AddSeconds(6)
+    do {
+        $durante = EstadoPedido $id $token
+        $vioFallo = $durante -and (($durante.pasos -join " ") -match "Pagos no responde")
+        if (-not $vioFallo) { Start-Sleep -Seconds 1 }
+    } while (-not $vioFallo -and (Get-Date) -lt $fin)
     docker start $ContenedorPagos *> $null
     $e = if ($id) { (EsperarFin @($id) $token 40)[0] } else { $null }
     $s1 = Stock
-    $ok = $durante -and $durante.estado -eq "PENDIENTE" -and $e -and $e.estado -eq "CONFIRMADO" -and $s1 -eq ($s0 - 1)
+    $ok = $durante -and $durante.estado -eq "PENDIENTE" -and $vioFallo -and $e -and $e.estado -eq "CONFIRMADO" -and $s1 -eq ($s0 - 1)
     $txt = if ($durante) { $durante.estado } else { "—" }
     Prueba "5. Con Pagos apagado, el pedido $id espera ($txt) y termina CONFIRMADO al volver Pagos" "TODO 4" $ok
 
     # ── Saga con fallos al azar: el stock y los cobros cuadran ────────────
+    EsperarServicios
     Simular 0.5
     $s0 = Stock; $c0 = Cobros
     $ids = @(1..8 | ForEach-Object { CrearPedido $token 1 })
