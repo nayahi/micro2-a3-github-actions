@@ -1,0 +1,26 @@
+// PaymentService.gRPC · contrato del servicio de Pagos (Clase 4)
+// Es un servicio SIMULADO: no cobra de verdad. Sirve para ver la saga del pedido cuando el pago sale bien,
+// cuando se rechaza (fallo de negocio → compensar) y cuando el servicio no responde (fallo transitorio → reintentar).
+syntax = "proto3";
+
+option csharp_namespace = "ECommerceGRPC.Payments";
+
+package payments.v1;
+
+service PaymentService {
+  // Saga, paso 2. Unary. Cobra el total del pedido.
+  // Idempotente por order_id: si el pedido ya se cobró, devuelve el mismo pago (already_charged = true).
+  // Si la simulación lo rechaza, responde FAILED_PRECONDITION: es un fallo de negocio, no se reintenta.
+  rpc Charge (ChargeRequest) returns (ChargeReply);
+}
+
+message ChargeRequest {
+  int32 order_id = 1;
+  int32 user_id = 2;
+  double amount = 3;
+}
+
+message ChargeReply {
+  int32 payment_id = 1;
+  bool already_charged = 2;
+}
